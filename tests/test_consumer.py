@@ -5,8 +5,10 @@ from uuid import uuid4
 
 import pika
 
-from app.consumer import PaymentNotificationConsumer
-from app.settings import Settings
+from app.adapters.inbound.messaging.payment_notification_consumer import (
+    PaymentNotificationConsumer,
+)
+from config.settings import Settings
 
 
 def create_body() -> bytes:
@@ -40,34 +42,34 @@ def create_delivery(headers=None):
     return channel, method, properties
 
 
-def create_consumer(delivery):
+def create_consumer(use_case):
     return PaymentNotificationConsumer(
         Settings(_env_file=None),
-        delivery_factory=lambda: delivery,
+        use_case_factory=lambda: use_case,
     )
 
 
 def test_successful_delivery_acknowledges_message():
     channel, method, properties = create_delivery()
-    delivery = Mock()
+    use_case = Mock()
 
-    create_consumer(delivery).handle_message(
+    create_consumer(use_case).handle_message(
         channel,
         method,
         properties,
         create_body(),
     )
 
-    delivery.deliver.assert_called_once()
+    use_case.execute.assert_called_once()
     channel.basic_ack.assert_called_once_with(delivery_tag=7)
 
 
 def test_failed_delivery_is_sent_to_retry_queue():
     channel, method, properties = create_delivery()
-    delivery = Mock()
-    delivery.deliver.side_effect = RuntimeError("merchant unavailable")
+    use_case = Mock()
+    use_case.execute.side_effect = RuntimeError("merchant unavailable")
 
-    create_consumer(delivery).handle_message(
+    create_consumer(use_case).handle_message(
         channel,
         method,
         properties,
@@ -82,10 +84,10 @@ def test_failed_delivery_is_sent_to_retry_queue():
 
 def test_exhausted_delivery_is_dead_lettered():
     channel, method, properties = create_delivery(headers={"x-retry-count": 3})
-    delivery = Mock()
-    delivery.deliver.side_effect = RuntimeError("merchant unavailable")
+    use_case = Mock()
+    use_case.execute.side_effect = RuntimeError("merchant unavailable")
 
-    create_consumer(delivery).handle_message(
+    create_consumer(use_case).handle_message(
         channel,
         method,
         properties,
@@ -99,15 +101,15 @@ def test_exhausted_delivery_is_dead_lettered():
 
 def test_invalid_message_is_dead_lettered_without_delivery():
     channel, method, properties = create_delivery()
-    delivery = Mock()
+    use_case = Mock()
 
-    create_consumer(delivery).handle_message(
+    create_consumer(use_case).handle_message(
         channel,
         method,
         properties,
         b"not-json",
     )
 
-    delivery.deliver.assert_not_called()
+    use_case.execute.assert_not_called()
     exchange = channel.basic_publish.call_args.kwargs["exchange"]
     assert exchange == "webhook.dead-letter"

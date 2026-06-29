@@ -1,9 +1,11 @@
 import logging
 import signal
 
-from app.consumer import PaymentNotificationConsumer
-from app.delivery import WebhookDelivery
-from app.settings import settings
+from app.adapters.inbound.messaging.payment_notification_consumer import (
+    PaymentNotificationConsumer,
+)
+from app.bootstrap import get_deliver_payment_notification_use_case
+from config.settings import settings
 
 
 def main() -> None:
@@ -13,9 +15,7 @@ def main() -> None:
     )
     consumer = PaymentNotificationConsumer(
         settings=settings,
-        delivery_factory=lambda: WebhookDelivery(
-            timeout_seconds=settings.webhook_timeout_seconds
-        ),
+        use_case_factory=get_deliver_payment_notification_use_case,
     )
     signal.signal(signal.SIGTERM, lambda *_: consumer.stop())
     signal.signal(signal.SIGINT, lambda *_: consumer.stop())

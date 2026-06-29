@@ -3,8 +3,11 @@ from uuid import uuid4
 import respx
 from httpx import Response
 
-from app.delivery import WebhookDelivery
-from app.schemas import PaymentNotificationMessage
+from app.adapters.inbound.messaging.schemas import PaymentNotificationMessage
+from app.application.use_cases.deliver_payment_notification import (
+    DeliverPaymentNotificationUseCase,
+)
+from app.infrastructure.gateways.http_webhook_client import HttpWebhookClient
 
 
 def create_notification() -> PaymentNotificationMessage:
@@ -32,7 +35,9 @@ def test_delivery_posts_public_contract_and_idempotency_headers():
     )
     notification = create_notification()
 
-    WebhookDelivery(timeout_seconds=2).deliver(notification)
+    webhook_client = HttpWebhookClient(timeout_seconds=2)
+    use_case = DeliverPaymentNotificationUseCase(webhook_client)
+    use_case.execute(notification.to_command())
 
     request = route.calls[0].request
     body = request.content.decode()

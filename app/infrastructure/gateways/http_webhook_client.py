@@ -1,17 +1,17 @@
 import httpx
 
-from app.schemas import PaymentNotificationMessage
+from app.domain.models import PaymentNotification
 
 
-class WebhookDelivery:
+class HttpWebhookClient:
     def __init__(self, timeout_seconds: float):
         self.timeout_seconds = timeout_seconds
 
-    def deliver(self, notification: PaymentNotificationMessage) -> None:
+    def deliver(self, notification: PaymentNotification) -> None:
         event_id = str(notification.event_id)
         response = httpx.post(
-            str(notification.notification_url),
-            json=notification.delivery_payload(),
+            notification.notification_url,
+            json=notification.merchant_payload(),
             headers={
                 "X-OnyxPay-Event-Id": event_id,
                 "Idempotency-Key": event_id,

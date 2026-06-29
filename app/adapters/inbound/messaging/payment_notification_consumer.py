@@ -5,10 +5,14 @@ from collections.abc import Callable
 import pika
 from pydantic import ValidationError
 
-from app.delivery import WebhookDelivery
-from app.rabbitmq import connection_parameters
-from app.schemas import PaymentNotificationMessage
-from app.settings import Settings
+from app.adapters.inbound.messaging.schemas import PaymentNotificationMessage
+from app.application.use_cases.deliver_payment_notification import (
+    DeliverPaymentNotificationUseCase,
+)
+from app.infrastructure.messaging.rabbitmq_connection import (
+    connection_parameters,
+)
+from config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +21,10 @@ class PaymentNotificationConsumer:
     def __init__(
         self,
         settings: Settings,
-        delivery_factory: Callable[[], WebhookDelivery],
+        use_case_factory: Callable[[], DeliverPaymentNotificationUseCase],
     ):
         self.settings = settings
-        self.delivery_factory = delivery_factory
+        self.use_case_factory = use_case_factory
         self.connection = None
         self.channel = None
         self.stopping = False
@@ -51,7 +55,7 @@ class PaymentNotificationConsumer:
                 self._close_connection()
 
             if not self.stopping:
-                time.sleep(self.settings.rabbitmq_reconnect_delay_seconds)
+                time.sleep(self.settings.webhook_reconnect_delay_seconds)
 
     def stop(self) -> None:
         self.stopping = True
@@ -68,7 +72,7 @@ class PaymentNotificationConsumer:
             return
 
         try:
-            self.delivery_factory().deliver(notification)
+            self.use_case_factory().execute(notification.to_command())
         except Exception:
             logger.exception(
                 "Webhook delivery failed for event %s",
@@ -103,15 +107,15 @@ class PaymentNotificationConsumer:
         )
 
         channel.exchange_declare(
-            exchange=settings.rabbitmq_retry_exchange,
+            exchange=settings.webhook_retry_exchange,
             exchange_type="direct",
             durable=True,
         )
         channel.queue_declare(
-            queue=settings.rabbitmq_retry_queue,
+            queue=settings.webhook_retry_queue,
             durable=True,
             arguments={
-                "x-message-ttl": settings.rabbitmq_retry_delay_ms,
+                "x-message-ttl": settings.webhook_retry_delay_ms,
                 "x-dead-letter-exchange": settings.rabbitmq_exchange,
                 "x-dead-letter-routing-key": (
                     settings.rabbitmq_notification_routing_key
@@ -119,24 +123,24 @@ class PaymentNotificationConsumer:
             },
         )
         channel.queue_bind(
-            exchange=settings.rabbitmq_retry_exchange,
-            queue=settings.rabbitmq_retry_queue,
-            routing_key=settings.rabbitmq_retry_routing_key,
+            exchange=settings.webhook_retry_exchange,
+            queue=settings.webhook_retry_queue,
+            routing_key=settings.webhook_retry_routing_key,
         )
 
         channel.exchange_declare(
-            exchange=settings.rabbitmq_dead_letter_exchange,
+            exchange=settings.webhook_dead_letter_exchange,
             exchange_type="direct",
             durable=True,
         )
         channel.queue_declare(
-            queue=settings.rabbitmq_dead_letter_queue,
+            queue=settings.webhook_dead_letter_queue,
             durable=True,
         )
         channel.queue_bind(
-            exchange=settings.rabbitmq_dead_letter_exchange,
-            queue=settings.rabbitmq_dead_letter_queue,
-            routing_key=settings.rabbitmq_dead_letter_routing_key,
+            exchange=settings.webhook_dead_letter_exchange,
+            queue=settings.webhook_dead_letter_queue,
+            routing_key=settings.webhook_dead_letter_routing_key,
         )
 
     def _retry_or_dead_letter(
@@ -148,15 +152,15 @@ class PaymentNotificationConsumer:
     ) -> None:
         headers = dict(properties.headers or {})
         retry_count = int(headers.get("x-retry-count", 0))
-        if retry_count >= self.settings.rabbitmq_max_retries:
+        if retry_count >= self.settings.webhook_max_retries:
             self._dead_letter(channel, delivery_tag, properties, body)
             return
 
         headers["x-retry-count"] = retry_count + 1
         if self._publish(
             channel,
-            self.settings.rabbitmq_retry_exchange,
-            self.settings.rabbitmq_retry_routing_key,
+            self.settings.webhook_retry_exchange,
+            self.settings.webhook_retry_routing_key,
             properties,
             headers,
             body,
@@ -175,8 +179,8 @@ class PaymentNotificationConsumer:
         headers = dict(properties.headers or {})
         if self._publish(
             channel,
-            self.settings.rabbitmq_dead_letter_exchange,
-            self.settings.rabbitmq_dead_letter_routing_key,
+            self.settings.webhook_dead_letter_exchange,
+            self.settings.webhook_dead_letter_routing_key,
             properties,
             headers,
             body,
@@ -201,9 +205,7 @@ class PaymentNotificationConsumer:
                     routing_key=routing_key,
                     body=body,
                     properties=pika.BasicProperties(
-                        content_type=(
-                            properties.content_type or "application/json"
-                        ),
+                        content_type=(properties.content_type or "application/json"),
                         delivery_mode=2,
                         message_id=properties.message_id,
                         correlation_id=properties.correlation_id,

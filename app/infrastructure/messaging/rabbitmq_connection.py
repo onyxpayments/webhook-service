@@ -1,6 +1,6 @@
 import pika
 
-from app.settings import Settings
+from config.settings import Settings
 
 
 def connection_parameters(settings: Settings) -> pika.ConnectionParameters:

@@ -2,8 +2,10 @@ import sys
 
 import pika
 
-from app.rabbitmq import connection_parameters
-from app.settings import settings
+from app.infrastructure.messaging.rabbitmq_connection import (
+    connection_parameters,
+)
+from config.settings import settings
 
 
 def main() -> None:
