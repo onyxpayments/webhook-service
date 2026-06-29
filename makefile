@@ -1,14 +1,16 @@
-.PHONY: run format test lint
+venv:
+	python3 -m venv .venv
 
-run:
-	python -m app.worker
+install: venv
+	.venv/bin/pip install --upgrade pip
+	.venv/bin/pip install -r requirements.txt
 
 format:
-	black app config tests
-
-test:
-	pytest -q
+	.venv/bin/black .
 
 lint:
-	black --check app config tests
-	flake8 app config tests
+	.venv/bin/black --check app tests
+	.venv/bin/flake8 app tests
+
+test:
+	.venv/bin/pytest -vv
