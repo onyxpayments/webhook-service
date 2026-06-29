@@ -1,0 +1,9 @@
+pydantic
+pydantic-settings
+pika
+httpx
+
+pytest
+respx
+black
+flake8
